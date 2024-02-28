@@ -1,0 +1,155 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  SAM Template
+
+Globals:
+  Function:
+    Runtime: dotnet6
+    Timeout: 30
+    MemorySize: 512
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        SECRET_ARN: !GetAtt DBCluster.MasterUserSecret.SecretArn
+        CLUSTER_ARN: !GetAtt DBCluster.DBClusterArn
+        DATABASE: mydatabase
+
+Resources:
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Aurora DB subnet group
+      SubnetIds:
+        - <MY_SUBNET_1>
+        - <MY_SUBNET_2>
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: Aurora DB SG
+      GroupDescription: Ingress rules for Aurora DB
+      VpcId: <MY_VPC>
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0
+
+  DBCluster:
+    Type: AWS::RDS::DBCluster
+    DeletionPolicy: Delete
+    Properties:
+      DatabaseName: mydatabase
+      DBClusterIdentifier: my-dbcluster
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      Engine: aurora-postgresql
+      EngineVersion: 15.4
+      MasterUsername: <MY_USER>
+      ManageMasterUserPassword: True
+      Port: 5432
+      EnableHttpEndpoint: true
+      ServerlessV2ScalingConfiguration:
+        MaxCapacity: 1.0
+        MinCapacity: 0.5
+      VpcSecurityGroupIds:
+        - !Ref DBSecurityGroup
+
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBClusterIdentifier: !Ref DBCluster
+      DBInstanceIdentifier: my-dbinstance
+      DBInstanceClass: db.serverless
+      Engine: aurora-postgresql
+
+  RegisterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: MyApi::MyApi.Function::Register
+      CodeUri: ./src/MyApi/
+      Policies:
+        - Statement:
+          - Effect: Allow
+            Action: 
+              - rds-data:BatchExecuteStatement
+              - rds-data:BeginTransaction
+              - rds-data:CommitTransaction   
+              - rds-data:RollbackTransaction
+              - rds-data:ExecuteStatement
+            Resource: !GetAtt DBCluster.DBClusterArn
+          - Effect: Allow
+            Action: 
+              - secretsmanager:GetSecretValue
+            Resource: !GetAtt DBCluster.MasterUserSecret.SecretArn
+      Events:
+        RegisterTask:
+          Type: Api
+          Properties:
+            Path: /tasks
+            Method: post
+
+  GetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: MyApi::MyApi.Function::Get
+      CodeUri: ./src/MyApi/
+      Policies:
+        - Statement:
+          - Effect: Allow
+            Action: 
+              - rds-data:BatchExecuteStatement
+              - rds-data:BeginTransaction
+              - rds-data:CommitTransaction   
+              - rds-data:RollbackTransaction
+              - rds-data:ExecuteStatement
+            Resource: !GetAtt DBCluster.DBClusterArn
+          - Effect: Allow
+            Action: 
+              - secretsmanager:GetSecretValue
+            Resource: !GetAtt DBCluster.MasterUserSecret.SecretArn
+      Events:
+        ListTask:
+          Type: Api
+          Properties:
+            Path: /tasks/{taskId}
+            Method: get
+
+  ListFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: MyApi::MyApi.Function::List
+      CodeUri: ./src/MyApi/
+      Policies:
+        - Statement:
+          - Effect: Allow
+            Action: 
+              - rds-data:BatchExecuteStatement
+              - rds-data:BeginTransaction
+              - rds-data:CommitTransaction   
+              - rds-data:RollbackTransaction
+              - rds-data:ExecuteStatement
+            Resource: !GetAtt DBCluster.DBClusterArn
+          - Effect: Allow
+            Action: 
+              - secretsmanager:GetSecretValue
+            Resource: !GetAtt DBCluster.MasterUserSecret.SecretArn
+      Events:
+        ListTask:
+          Type: Api
+          Properties:
+            Path: /tasks
+            Method: get
+
+Outputs:
+  DBSecret:
+    Description: Secret arn
+    Value: !GetAtt DBCluster.MasterUserSecret.SecretArn
+  DBCluster:
+    Description: Cluster arn
+    Value: !GetAtt DBCluster.DBClusterArn
+  Api:
+    Description: "API Gateway endpoint URL"
+    Value: 
+      Fn::Sub: "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/tasks/"
